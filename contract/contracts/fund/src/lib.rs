@@ -9,6 +9,7 @@ use soroban_sdk::{
     contract, contractclient, contracterror, contractevent, contractimpl, contracttype, token,
     Address, Env,
 };
+use ttl::{bump, bump_instance};
 
 /// Minimal client interface for the companion DonorBadge contract. Lets
 /// StellarFund make a typed cross-contract call without depending on the badge
@@ -141,6 +142,12 @@ impl FundContract {
         let donor_total = prev + amount;
         env.storage().persistent().set(&key, &donor_total);
 
+        // Every donation touches the campaign state — rent-bump the contract
+        // instance/code and the donor's contribution so nothing expires under
+        // an active campaign.
+        bump(&env, &key);
+        bump_instance(&env);
+
         // Inter-contract communication: if a DonorBadge contract is registered,
         // call it to award/upgrade this donor's loyalty tier from their running
         // total. The call is best-effort relative to the donation itself, but
@@ -172,6 +179,7 @@ impl FundContract {
         let owner: Address = s.get(&DataKey::Owner).unwrap();
         owner.require_auth();
         s.set(&DataKey::Badge, &badge);
+        bump_instance(&env);
     }
 
     /// Withdraw collected funds based on reached milestones. Only the owner can call.
@@ -205,6 +213,7 @@ impl FundContract {
             &DataKey::AmountWithdrawn,
             &(amount_withdrawn + withdrawable),
         );
+        bump_instance(&env);
 
         Withdrawn {
             owner,
@@ -238,11 +247,13 @@ impl FundContract {
 
         // Zero out contribution
         env.storage().persistent().set(&key, &0i128);
+        bump(&env, &key);
 
         // Subtract from total raised
         let mut raised: i128 = s.get(&DataKey::Raised).unwrap();
         raised -= prev;
         s.set(&DataKey::Raised, &raised);
+        bump_instance(&env);
 
         // Refund the token
         let token: Address = s.get(&DataKey::Token).unwrap();
@@ -279,10 +290,13 @@ impl FundContract {
         env.storage().instance().get(&DataKey::Badge)
     }
     pub fn contribution(env: Env, who: Address) -> i128 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Contribution(who))
-            .unwrap_or(0)
+        let key = DataKey::Contribution(who);
+        let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        if current > 0 {
+            // Reading a donor's contribution keeps their entry alive.
+            bump(&env, &key);
+        }
+        current
     }
     pub fn deadline(env: Env) -> u64 {
         env.storage().instance().get(&DataKey::Deadline).unwrap()

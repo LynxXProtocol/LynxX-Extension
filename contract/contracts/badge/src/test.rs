@@ -1,7 +1,10 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{
+    testutils::{storage::Persistent as _, Address as _, Ledger as _},
+    Address, Env,
+};
 
 fn setup<'a>() -> (Env, Address, BadgeContractClient<'a>) {
     let env = Env::default();
@@ -116,4 +119,114 @@ fn exact_tier_boundaries() {
     assert_eq!(client.award(&donor, &999_999_999), 2);
     // exact gold threshold
     assert_eq!(client.award(&donor, &1_000_000_000), 3);
+}
+
+/// Awarding a badge must rent-bump the persistent tier entry to the full
+/// 30-day TTL window instead of leaving it at the minimum.
+#[test]
+fn award_bumps_tier_ttl() {
+    let (env, _admin, client) = setup();
+    let donor = Address::generate(&env);
+
+    assert_eq!(client.award(&donor, &10_000_000), 1);
+
+    env.as_contract(&client.address, || {
+        let tier_key = DataKey::Tier(donor.clone());
+        assert_eq!(
+            env.storage().persistent().get_ttl(&tier_key),
+            ttl::DEFAULT_EXTEND_TO
+        );
+    });
+}
+
+/// A badge query must automatically bump the entry's TTL when the remaining
+/// ledgers fall below the 14-day threshold.
+#[test]
+fn badge_query_bumps_expiring_ttl() {
+    let (env, _admin, client) = setup();
+    let donor = Address::generate(&env);
+
+    client.award(&donor, &100_000_000); // Silver
+    let start = env.ledger().sequence();
+
+    // Fast-forward until fewer than 14 days remain, but the entry is still live.
+    let below_threshold = ttl::DEFAULT_EXTEND_TO - ttl::DEFAULT_THRESHOLD + 1;
+    env.ledger()
+        .set_sequence_number(start + below_threshold);
+
+    // The query re-arms the entry to the full 30-day window.
+    assert_eq!(client.tier(&donor), 2);
+    env.as_contract(&client.address, || {
+        let tier_key = DataKey::Tier(donor.clone());
+        assert_eq!(
+            env.storage().persistent().get_ttl(&tier_key),
+            ttl::DEFAULT_EXTEND_TO
+        );
+    });
+}
+
+/// Simulated archival eviction: after the entry's TTL lapses, `restore_badge`
+/// recovers the user's historical tier without data loss.
+#[test]
+fn archived_badge_is_restored_without_data_loss() {
+    let (env, _admin, client) = setup();
+    let donor = Address::generate(&env);
+
+    // Donor earns a Gold tier, then the badge sits untouched until it archives.
+    assert_eq!(client.award(&donor, &1_000_000_000), 3);
+    let ttl = env.as_contract(&client.address, || {
+        let tier_key = DataKey::Tier(donor.clone());
+        env.storage().persistent().get_ttl(&tier_key)
+    });
+
+    // Simulate archival: advance past the entry's live-until ledger.
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + ttl + 1);
+
+    // restore_badge re-initializes the archived tier from verifiable proof data.
+    let restored = client.restore_badge(&donor, &3);
+    assert_eq!(restored, 3);
+
+    // Historical tier recovered intact — no data loss.
+    assert_eq!(client.tier(&donor), 3);
+    assert_eq!(client.minted(), 1);
+
+    // The recovered entry gets a fresh 30-day rental window.
+    env.as_contract(&client.address, || {
+        let tier_key = DataKey::Tier(donor.clone());
+        assert_eq!(
+            env.storage().persistent().get_ttl(&tier_key),
+            ttl::DEFAULT_EXTEND_TO
+        );
+    });
+}
+
+/// restore_badge must reject proof data that does not match the donor's actual
+/// (archived) tier — a caller cannot forge a higher tier.
+#[test]
+fn restore_badge_rejects_forged_proof() {
+    let (env, _admin, client) = setup();
+    let donor = Address::generate(&env);
+
+    assert_eq!(client.award(&donor, &1_000_000_000), 3); // Gold
+    let ttl = env.as_contract(&client.address, || {
+        let tier_key = DataKey::Tier(donor.clone());
+        env.storage().persistent().get_ttl(&tier_key)
+    });
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + ttl + 1);
+
+    // Claiming Silver (2) against a stored Gold (3) must fail.
+    let res = client.try_restore_badge(&donor, &2);
+    assert_eq!(res, Err(Ok(Error::ProofMismatch)));
+}
+
+/// restore_badge on a donor who never earned a badge is a no-op error.
+#[test]
+fn restore_badge_unknown_donor_fails() {
+    let (env, _admin, client) = setup();
+    let stranger = Address::generate(&env);
+
+    let res = client.try_restore_badge(&stranger, &1);
+    assert_eq!(res, Err(Ok(Error::NotInitialized)));
 }

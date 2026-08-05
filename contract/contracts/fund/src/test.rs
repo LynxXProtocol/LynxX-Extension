@@ -1,7 +1,10 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, testutils::Ledger, token, Address, Env};
+use soroban_sdk::{
+    testutils::{storage::Instance as _, storage::Persistent as _, Address as _, Ledger},
+    token, Address, Env,
+};
 
 fn create_token<'a>(e: &Env, admin: &Address) -> (Address, token::StellarAssetClient<'a>) {
     let sac = e.register_stellar_asset_contract_v2(admin.clone());
@@ -290,4 +293,46 @@ fn test_exact_goal_boundary() {
     // Donate 1 more, should fail.
     let res = client.try_donate(&donor, &1);
     assert_eq!(res, Err(Ok(Error::CampaignClosed)));
+}
+
+/// Every donation must rent-bump the donor's contribution entry and the
+/// campaign instance/code to the full 30-day TTL window.
+#[test]
+fn test_donation_bumps_storage_ttl() {
+    let (env, _owner, donor, _token, client) = setup();
+
+    client.donate(&donor, &200);
+
+    env.as_contract(&client.address, || {
+        let key = DataKey::Contribution(donor.clone());
+        assert_eq!(
+            env.storage().persistent().get_ttl(&key),
+            ttl::DEFAULT_EXTEND_TO
+        );
+        assert_eq!(
+            env.storage().instance().get_ttl(),
+            ttl::DEFAULT_EXTEND_TO
+        );
+    });
+}
+
+/// A contribution query must re-arm an expiring entry back to 30 days.
+#[test]
+fn test_contribution_query_bumps_expiring_ttl() {
+    let (env, _owner, donor, _token, client) = setup();
+    client.donate(&donor, &200);
+
+    // Fast-forward until fewer than 14 days remain on the contribution entry.
+    env.ledger().set_sequence_number(
+        env.ledger().sequence() + (ttl::DEFAULT_EXTEND_TO - ttl::DEFAULT_THRESHOLD + 1),
+    );
+
+    assert_eq!(client.contribution(&donor), 200);
+    env.as_contract(&client.address, || {
+        let key = DataKey::Contribution(donor.clone());
+        assert_eq!(
+            env.storage().persistent().get_ttl(&key),
+            ttl::DEFAULT_EXTEND_TO
+        );
+    });
 }

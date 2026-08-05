@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
+ttl = { path = "../ttl" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
