@@ -39,7 +39,9 @@ pub fn extend_storage_ttl<K>(env: &Env, key: &K, threshold: u32, extend_to: u32)
 where
     K: IntoVal<Env, Val>,
 {
-    env.storage().persistent().extend_ttl(key, threshold, extend_to);
+    env.storage()
+        .persistent()
+        .extend_ttl(key, threshold, extend_to);
 }
 
 /// Bump a persistent `key` to the default 30-day TTL when it falls below the
@@ -58,7 +60,9 @@ where
 /// persistent entry per contract, so one call covers it all — and it also keeps
 /// the deployed contract code from being archived.
 pub fn bump_instance(env: &Env) {
-    env.storage().instance().extend_ttl(DEFAULT_THRESHOLD, DEFAULT_EXTEND_TO);
+    env.storage()
+        .instance()
+        .extend_ttl(DEFAULT_THRESHOLD, DEFAULT_EXTEND_TO);
 }
 
 #[cfg(test)]
@@ -140,10 +144,9 @@ mod test {
         client.write(&7);
 
         // Simulate archival by advancing the ledger beyond the entry's TTL.
-        let ttl = env.as_contract(&id, || {
-            env.storage().persistent().get_ttl(&Key::Counter)
-        });
-        env.ledger().set_sequence_number(env.ledger().sequence() + ttl + 1);
+        let ttl = env.as_contract(&id, || env.storage().persistent().get_ttl(&Key::Counter));
+        env.ledger()
+            .set_sequence_number(env.ledger().sequence() + ttl + 1);
 
         // Accessing the archived entry recovers it (Protocol 23 auto-restore),
         // and the value is intact — no data loss.

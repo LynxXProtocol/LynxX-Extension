@@ -151,8 +151,7 @@ fn badge_query_bumps_expiring_ttl() {
 
     // Fast-forward until fewer than 14 days remain, but the entry is still live.
     let below_threshold = ttl::DEFAULT_EXTEND_TO - ttl::DEFAULT_THRESHOLD + 1;
-    env.ledger()
-        .set_sequence_number(start + below_threshold);
+    env.ledger().set_sequence_number(start + below_threshold);
 
     // The query re-arms the entry to the full 30-day window.
     assert_eq!(client.tier(&donor), 2);

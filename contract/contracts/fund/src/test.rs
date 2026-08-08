@@ -309,10 +309,7 @@ fn test_donation_bumps_storage_ttl() {
             env.storage().persistent().get_ttl(&key),
             ttl::DEFAULT_EXTEND_TO
         );
-        assert_eq!(
-            env.storage().instance().get_ttl(),
-            ttl::DEFAULT_EXTEND_TO
-        );
+        assert_eq!(env.storage().instance().get_ttl(), ttl::DEFAULT_EXTEND_TO);
     });
 }
 
