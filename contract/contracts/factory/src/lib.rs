@@ -2,6 +2,7 @@
 //! Factory Contract for LynxX campaigns
 //! Deploys new `fund` contract instances.
 use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Val, Vec};
+use ttl::bump_instance;
 
 #[contracttype]
 #[derive(Clone)]
@@ -63,11 +64,15 @@ impl FactoryContract {
         campaigns.push_back(deployed_address.clone());
         s.set(&DataKey::Campaigns, &campaigns);
 
+        // The factory registry is the index into every campaign — keep it alive.
+        bump_instance(&env);
+
         deployed_address
     }
 
     /// Read-only view returning all deployed campaigns
     pub fn all_campaigns(env: Env) -> Vec<Address> {
+        bump_instance(&env);
         env.storage().instance().get(&DataKey::Campaigns).unwrap()
     }
 }
