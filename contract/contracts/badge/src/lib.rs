@@ -113,7 +113,12 @@ impl BadgeContract {
         } else {
             // Tiers never downgrade. The donor's badge was still read this
             // transaction, so keep it from expiring under an active donor.
-            bump(&env, &key);
+            // Only bump if the entry actually exists — a donor who has never
+            // crossed a threshold has no persistent key yet, and calling
+            // extend_ttl on a missing entry panics.
+            if prev > 0 {
+                bump(&env, &key);
+            }
             prev
         }
     }
