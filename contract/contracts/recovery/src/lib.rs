@@ -637,7 +637,6 @@ impl RecoveryContract {
             .unwrap()
             .iter()
             .find(|g| g.address == address)
-            .cloned()
     }
 
     /// The id of the challenge currently in flight, if any.
