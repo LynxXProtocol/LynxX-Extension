@@ -560,8 +560,15 @@ impl RecoveryContract {
     /// Anyone may push this through once both are met (relayers included).
     pub fn execute_recovery(env: Env, recovery_id: u32) -> Result<u32, Error> {
         let s = env.storage().instance();
+
         let Some(active_id) = s.get::<DataKey, u32>(&DataKey::ActiveRecovery) else {
-            return Err(Error::NoActiveRecovery);
+            // No challenge is in flight. Only a cancelled challenge has a
+            // terminal state worth reporting; executed or unknown ids are not
+            // executable.
+            if load_recovery(&env, recovery_id)?.cancelled {
+                return Err(Error::AlreadyCancelled);
+            }
+            return Err(Error::RecoveryNotFound);
         };
         if active_id != recovery_id {
             return Err(Error::RecoveryNotFound);
@@ -581,7 +588,7 @@ impl RecoveryContract {
         }
 
         let now = env.ledger().timestamp();
-        if now < rec.started_at.saturating_add(RECOVERY_TIMELOCK_SECS) {
+        if now <= rec.started_at.saturating_add(RECOVERY_TIMELOCK_SECS) {
             return Err(Error::TimelockNotExpired);
         }
 
