@@ -256,7 +256,7 @@ impl RecoveryContract {
             return Err(Error::GuardianLimitExceeded);
         }
         for g in gs.iter() {
-            if &g.address == &guardian.address {
+            if g.address == guardian.address {
                 return Err(Error::DuplicateGuardian);
             }
         }
@@ -285,7 +285,7 @@ impl RecoveryContract {
         let mut updated = Vec::new(&env);
         let mut removed: Option<Guardian> = None;
         for g in gs.iter() {
-            if &g.address == &address {
+            if g.address == address {
                 removed = Some(g);
             } else {
                 updated.push_back(g);
@@ -332,7 +332,7 @@ impl RecoveryContract {
         let mut found = false;
         let mut updated = Vec::new(&env);
         for g in gs.iter() {
-            if &g.address == &address {
+            if g.address == address {
                 updated.push_back(Guardian {
                     address: g.address,
                     weight,
@@ -444,7 +444,7 @@ impl RecoveryContract {
         let mut weight = 0;
         let mut is_guardian = false;
         for g in gs.iter() {
-            if &g.address == &guardian && g.status == GuardianStatus::Active {
+            if g.address == guardian && g.status == GuardianStatus::Active {
                 weight = g.weight;
                 is_guardian = true;
             }
@@ -462,7 +462,7 @@ impl RecoveryContract {
         }
 
         for sup in rec.supporters.iter() {
-            if &sup == &guardian {
+            if sup == guardian {
                 return Err(Error::AlreadySupported);
             }
         }
@@ -498,7 +498,7 @@ impl RecoveryContract {
         let mut removed = false;
         let mut removed_weight = 0u32;
         for sup in rec.supporters.iter() {
-            if &sup == &guardian {
+            if sup == guardian {
                 removed = true;
                 removed_weight = guardian_weight(&env, &guardian);
             } else {
@@ -631,18 +631,13 @@ impl RecoveryContract {
 
     /// A single guardian entry, if registered.
     pub fn guardian(env: Env, address: Address) -> Option<Guardian> {
-        for g in env
-            .storage()
+        env.storage()
             .instance()
             .get::<DataKey, Vec<Guardian>>(&DataKey::Guardians)
             .unwrap()
             .iter()
-        {
-            if &g.address == &address {
-                return Some(g);
-            }
-        }
-        None
+            .find(|g| g.address == address)
+            .cloned()
     }
 
     /// The id of the challenge currently in flight, if any.
