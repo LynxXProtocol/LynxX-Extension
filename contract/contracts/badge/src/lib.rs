@@ -112,8 +112,12 @@ impl BadgeContract {
             new_tier
         } else {
             // Tiers never downgrade. The donor's badge was still read this
-            // transaction, so keep it from expiring under an active donor.
-            bump(&env, &key);
+            // transaction, so keep it from expiring under an active donor. If
+            // the donor has never earned a badge (prev == 0) there is no entry
+            // to bump — extending a missing key would raise Storage/MissingValue.
+            if prev > 0 {
+                bump(&env, &key);
+            }
             prev
         }
     }
