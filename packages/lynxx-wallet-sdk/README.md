@@ -195,6 +195,63 @@ interface LynxxConfig {
 
 ---
 
+## Browser Extension (Manifest V3)
+
+Alongside the wallet-provider API, the SDK ships the client-side extension
+runtime that backs `window.lynxx` for dApps. These modules live under
+`src/extension/` and are consumed by the extension's background service
+worker and content script (a full manifest/UI lives in the host app).
+
+### Architecture
+
+```
+in-page provider (window.lynxx)  ──postMessage──▶  content script  ──chrome.runtime──▶  background worker
+        ▲                                                                                   │
+        └──────────────  LynxxResponse (postMessage) ◀── resolve/reject ◀── confirmation popup
+```
+
+### `LynxxBackground` — service worker
+
+- **FIFO request queue.** `ProviderQueue` guarantees exactly one signing
+  modal is open at a time, so concurrent calls from multiple tabs cannot
+  overlap popups or corrupt nonce sequencing. Each queued request is keyed
+  by an internal id, so identical client ids from different tabs can never
+  collide.
+- **Popup dismissal.** Closing the confirmation window rejects the active
+  request with `USER_REJECTED` and immediately advances to the next queued
+  request.
+- **Origin isolation.** Every IPC message is validated against the
+  browser-provided `sender.origin` / `sender.frameId`; requests from
+  `frameId !== 0`, opaque (`"null"`) origins, or origins outside an optional
+  allowlist are rejected with `ORIGIN_MISMATCH` before they can open a modal.
+  Popup messages must come from the extension itself (extension id + URL).
+- **Clean lifecycle.** `dispose()` unregisters every listener and settles
+  all in-flight requests, so long-lived workers leak nothing.
+
+```ts
+import { LynxxBackground } from "lynxx-wallet-sdk/src/extension/background";
+
+const background = new LynxxBackground({
+  popupUrl: "popup/sign.html",
+  allowedOrigins: ["https://app.example.com"],
+}).start();
+```
+
+### Wire protocol
+
+| Channel | Direction | Purpose |
+|---|---|---|
+| `lynxx:rpc-request` | content script → worker | `signTransaction` / `signAuthEntry` |
+| `lynxx:popup-fetch` | popup → worker | fetch request details to render |
+| `lynxx:popup-decision` | popup → worker | user approve / reject |
+| `lynxx:rpc-response` | worker → caller | result or error |
+| `lynxx:ack` | worker → popup | decision recorded |
+
+Error codes: `USER_REJECTED`, `ORIGIN_MISMATCH`, `NOT_CONNECTED`,
+`POPUP_OPEN_FAILED`, `INVALID_REQUEST`, `INTERNAL_ERROR`.
+
+---
+
 ## Requirements
 
 - [`@stellar/stellar-sdk`](https://www.npmjs.com/package/@stellar/stellar-sdk) >= 10.0.0 (peer dependency)
